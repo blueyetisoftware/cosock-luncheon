@@ -339,17 +339,20 @@ function HttpMessage:body_type()
 
   enc = headers:get_all("transfer_encoding")
   local ty = "close"
-  if not enc then
-    return {
-      type = ty,
-    }
-  end
-  for _, v in ipairs(enc) do
-    if HttpMessage.includes_chunk_encoding(v) then
-      ty = "chunked"
-      break
+  if enc then
+    for _, v in ipairs(enc) do
+      if HttpMessage.includes_chunk_encoding(v) then
+        ty = "chunked"
+        break
+      end
     end
   end
+
+  -- Check for protocol violation: close-delimited responses in HTTP/1.1 must have Connection: close
+  if ty == "close" and self.http_version and self.http_version >= 1.1 and self:get_connection() ~= "close" then
+    return nil, "Protocol violation: close-delimited response without Connection: close in HTTP/1.1"
+  end
+
   local trailers = false
   if ty == "chunked" then
     local trailer = headers:get_all("trailer")
@@ -519,6 +522,17 @@ function HttpMessage:get_headers()
     end
   end
   return self.headers
+end
+
+---@return string|nil
+---@return nil|string
+function HttpMessage:get_connection()
+  local headers, err = self:get_headers()
+  if not headers then
+    return nil, err
+  end
+  local connection = headers:get_one("connection")
+  return connection and string.lower(connection)
 end
 
 --- Serailize the provide Request or Response into a string with new lines
